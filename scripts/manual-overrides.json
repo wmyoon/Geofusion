@@ -1,0 +1,20 @@
+{
+  "geometryIsoByName": {
+    "Kosovo": "XKX",
+    "Somaliland": "SOM",
+    "N. Cyprus": "CYP"
+  },
+  "countryOverrides": {
+    "XKX": {
+      "name": "Kosovo",
+      "aliases": ["Republic of Kosovo"],
+      "capital": "Pristina",
+      "capitalAliases": ["Prishtina"],
+      "continent": "Europe"
+    },
+    "PLW": {
+      "capital": "Ngerulmud",
+      "capitalAliases": ["Koror", "Melekeok"]
+    }
+  }
+}
