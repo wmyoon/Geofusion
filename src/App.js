@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { OutlinePreview } from './components/OutlinePreview';
 import { WorldMapPicker } from './components/WorldMapPicker';
 import { mulberry32 } from './lib/random';
-import { evaluateLocationQuestion, evaluateOutlineTextQuestion, evaluateTextQuestion, QUESTION_ORDER, questionHint, questionPrompt, dimensionLabel } from './lib/quiz';
+import { dimensionLabel, evaluateChineseNameChoiceQuestion, evaluateLocationQuestion, evaluateOutlineTextQuestion, evaluateTextQuestion, questionHint, questionOrderForScope, questionPrompt, } from './lib/quiz';
 import { loadRegistries } from './lib/registry';
 import { applyRoundToProgress, createEmptyProgress, loadProgress, saveProgress } from './lib/storage';
 import { formatNumber } from './lib/strings';
@@ -25,7 +25,7 @@ const formatPercent = (value) => `${Math.round(value)}%`;
 const scopeLabel = (scope) => (scope === 'world' ? 'World Countries' : 'China Provinces');
 const scopeDescription = (scope) => scope === 'world'
     ? 'Quiz yourself on world countries across outline, location, capital, population, and area.'
-    : 'Quiz yourself on China provincial-level divisions across outline, location, capital, population, and area.';
+    : 'Quiz yourself on China provincial-level divisions across outline, location, capital, population, area, and Chinese-name recognition.';
 const unitProgressKey = (scope, unitId) => `${scope}:${unitId}`;
 const shuffled = (values, rng) => {
     const copy = [...values];
@@ -35,21 +35,33 @@ const shuffled = (values, rng) => {
     }
     return copy;
 };
-const buildRoundQuestions = (units, seedValue, previousUnitId) => {
+const buildChoiceOptionIds = (units, answer, rng) => {
+    const distractors = shuffled(units.filter((unit) => unit.id !== answer.id), rng).slice(0, 3);
+    return shuffled([answer, ...distractors], rng).map((unit) => unit.id);
+};
+const buildRoundQuestions = (units, dimensions, seedValue, previousUnitId) => {
     const rng = mulberry32(seedValue);
-    const dimensions = shuffled([...QUESTION_ORDER], mulberry32(seedValue + 71));
+    const shuffledDimensions = shuffled([...dimensions], mulberry32(seedValue + 71));
     const questions = [];
     let previousId = previousUnitId;
-    dimensions.forEach((dimension) => {
-        let unit = units[Math.floor(rng() * units.length)];
-        if (units.length > 1) {
+    shuffledDimensions.forEach((dimension) => {
+        const unitPoolBase = dimension === 'chineseName'
+            ? units.filter((candidate) => Boolean(candidate.nameLocal && candidate.nameLocal.trim()))
+            : units;
+        const unitPool = unitPoolBase.length > 0 ? unitPoolBase : units;
+        let unit = unitPool[Math.floor(rng() * unitPool.length)];
+        if (unitPool.length > 1) {
             let guard = 0;
             while (unit.id === previousId && guard < 50) {
-                unit = units[Math.floor(rng() * units.length)];
+                unit = unitPool[Math.floor(rng() * unitPool.length)];
                 guard += 1;
             }
         }
-        questions.push({ dimension, unit });
+        const question = { dimension, unit };
+        if (dimension === 'chineseName') {
+            question.choiceOptionIds = buildChoiceOptionIds(unitPool, unit, rng);
+        }
+        questions.push(question);
         previousId = unit.id;
     });
     return questions;
@@ -83,6 +95,7 @@ const App = () => {
     const [questionIndex, setQuestionIndex] = useState(0);
     const [results, setResults] = useState([]);
     const [textGuess, setTextGuess] = useState('');
+    const [choiceGuessId, setChoiceGuessId] = useState(null);
     const [locationGuess, setLocationGuess] = useState(null);
     const [hintVisible, setHintVisible] = useState(false);
     const [hintUsed, setHintUsed] = useState(false);
@@ -109,6 +122,7 @@ const App = () => {
     }, []);
     const activeRegistry = registries?.[selectedScope] ?? null;
     const chinaRegistry = registries?.china ?? null;
+    const questionOrder = useMemo(() => (activeRegistry ? questionOrderForScope(selectedScope, activeRegistry.units) : questionOrderForScope(selectedScope, [])), [activeRegistry, selectedScope]);
     const chinaProvinceRows = useMemo(() => {
         if (!chinaRegistry) {
             return [];
@@ -159,6 +173,7 @@ const App = () => {
     }, [chinaRegistry]);
     const resetQuestionState = () => {
         setTextGuess('');
+        setChoiceGuessId(null);
         setLocationGuess(null);
         setHintVisible(false);
         setHintUsed(false);
@@ -181,7 +196,7 @@ const App = () => {
         if (!activeRegistry || activeRegistry.units.length === 0) {
             return;
         }
-        const generated = buildRoundQuestions(activeRegistry.units, seed + roundCount * 7919 + 17, lastQuestionUnitByScope[selectedScope]);
+        const generated = buildRoundQuestions(activeRegistry.units, questionOrder, seed + roundCount * 7919 + 17, lastQuestionUnitByScope[selectedScope]);
         setRoundQuestions(generated);
         setQuestionIndex(0);
         setResults([]);
@@ -190,8 +205,17 @@ const App = () => {
         setPhase('quiz');
     };
     const currentQuestion = roundQuestions[questionIndex] ?? null;
-    const currentDimension = currentQuestion?.dimension ?? QUESTION_ORDER[0];
+    const currentDimension = currentQuestion?.dimension ?? questionOrder[0] ?? 'outline';
     const activeUnit = currentQuestion?.unit ?? null;
+    const choiceOptions = useMemo(() => {
+        if (!activeRegistry || !currentQuestion?.choiceOptionIds) {
+            return [];
+        }
+        const byId = new Map(activeRegistry.units.map((unit) => [unit.id, unit]));
+        return currentQuestion.choiceOptionIds
+            .map((optionId) => byId.get(optionId))
+            .filter((unit) => Boolean(unit));
+    }, [activeRegistry, currentQuestion]);
     const submitAnswer = () => {
         if (!activeUnit || submittedResult) {
             return;
@@ -202,6 +226,10 @@ const App = () => {
         }
         if (currentDimension === 'location') {
             next = evaluateLocationQuestion(activeUnit, locationGuess, hintUsed);
+        }
+        if (currentDimension === 'chineseName') {
+            const selectedUnit = choiceOptions.find((option) => option.id === choiceGuessId) ?? null;
+            next = evaluateChineseNameChoiceQuestion(activeUnit, selectedUnit, hintUsed);
         }
         if (currentDimension === 'capital' || currentDimension === 'population' || currentDimension === 'area') {
             next = evaluateTextQuestion(currentDimension, activeUnit, textGuess, hintUsed);
@@ -266,20 +294,26 @@ const App = () => {
     const allUnitNames = activeRegistry.units.map((unit) => unit.name);
     const hidePopulationMetric = phase === 'quiz' && currentDimension === 'population';
     const hideAreaMetric = phase === 'quiz' && currentDimension === 'area';
+    const showTargetOutline = currentDimension === 'capital' ||
+        currentDimension === 'population' ||
+        currentDimension === 'area' ||
+        currentDimension === 'chineseName';
+    const usesTextInput = currentDimension === 'outline' ||
+        currentDimension === 'capital' ||
+        currentDimension === 'population' ||
+        currentDimension === 'area';
     return (_jsxs("main", { className: "app-shell", children: [_jsxs("header", { className: "hero card", children: [_jsxs("div", { children: [_jsx("p", { className: "eyebrow", children: "Geo Fusion Quiz" }), _jsx("h1", { children: scopeLabel(selectedScope) }), _jsx("p", { children: scopeDescription(selectedScope) }), _jsxs("div", { className: "mode-grid", role: "radiogroup", "aria-label": "Geography scope", children: [_jsx("button", { type: "button", className: selectedScope === 'world' ? 'mode-button active' : 'mode-button', onClick: () => switchScope('world'), children: "World Countries" }), _jsx("button", { type: "button", className: selectedScope === 'china' ? 'mode-button active' : 'mode-button', onClick: () => switchScope('china'), children: "China Provinces" })] }), _jsxs("div", { className: "actions-row hero-actions", children: [_jsx(TopActionButton, { label: showChinaMap ? 'Hide China map panel' : 'Show China map panel', caption: "Map", icon: _jsx(MapPanelIcon, {}), active: showChinaMap, onClick: () => setShowChinaMap((value) => !value), disabled: !chinaRegistry }), _jsx(TopActionButton, { label: showChinaCapitalTable ? 'Hide province capitals panel' : 'Show province capitals panel', caption: "Capitals", icon: _jsx(CapitalsPanelIcon, {}), active: showChinaCapitalTable, onClick: () => setShowChinaCapitalTable((value) => !value), disabled: !chinaRegistry }), _jsx(TopActionButton, { label: showChinaProvinceTable ? 'Hide China stats table panel' : 'Show China stats table panel', caption: "Stats", icon: _jsx(StatsPanelIcon, {}), active: showChinaProvinceTable, onClick: () => setShowChinaProvinceTable((value) => !value), disabled: !chinaRegistry })] })] }), _jsxs("dl", { className: "hero-stats", children: [_jsxs("div", { children: [_jsx("dt", { children: "Rounds" }), _jsx("dd", { children: progress.roundsPlayed })] }), _jsxs("div", { children: [_jsx("dt", { children: "Avg Score" }), _jsx("dd", { children: formatPercent(aggregateAverage) })] }), _jsxs("div", { children: [_jsx("dt", { children: "Best Round" }), _jsx("dd", { children: formatPercent(progress.bestRoundScore) })] })] })] }), showChinaMap && chinaRegistry ? (_jsxs("section", { className: "card stats-card", "aria-label": "China map", children: [_jsxs("div", { className: "stats-card-head", children: [_jsxs("div", { children: [_jsx("p", { className: "eyebrow", children: "China Provinces" }), _jsx("h2", { children: "China Province Map" })] }), _jsx("button", { type: "button", className: "button secondary", onClick: () => setShowChinaMap(false), children: "Close" })] }), _jsx(WorldMapPicker, { units: chinaRegistry.units, selectedPoint: null, onSelect: () => {
                             // Read-only map panel.
-                        }, ariaLabel: "China province boundaries map", interactive: false, helpText: "Read-only China province boundaries map." })] })) : null, showChinaCapitalTable && chinaRegistry ? (_jsxs("section", { className: "card stats-card", "aria-label": "China province capitals", children: [_jsxs("div", { className: "stats-card-head", children: [_jsxs("div", { children: [_jsx("p", { className: "eyebrow", children: "China Provinces" }), _jsx("h2", { children: "Province Capitals" })] }), _jsx("button", { type: "button", className: "button secondary", onClick: () => setShowChinaCapitalTable(false), children: "Close" })] }), _jsx("div", { className: "stats-table-wrap", children: _jsxs("table", { className: "stats-table capitals-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { scope: "col", children: "Province / Division" }), _jsx("th", { scope: "col", children: "Capital" })] }) }), _jsx("tbody", { children: chinaCapitalRows.map((row) => (_jsxs("tr", { children: [_jsxs("td", { children: [_jsx("strong", { children: row.name }), row.nameLocal ? _jsx("span", { children: row.nameLocal }) : null] }), _jsxs("td", { children: [_jsx("strong", { children: row.capitalPrimary }), row.capitalAliases.length > 0 ? _jsx("span", { children: row.capitalAliases.join(', ') }) : null] })] }, row.id))) })] }) })] })) : null, showChinaProvinceTable && chinaRegistry ? (_jsxs("section", { className: "card stats-card", "aria-label": "China province rankings", children: [_jsxs("div", { className: "stats-card-head", children: [_jsxs("div", { children: [_jsx("p", { className: "eyebrow", children: "China Provinces" }), _jsx("h2", { children: "Area and Population Table" }), _jsxs("p", { children: ["Sorted descending by", ' ', _jsx("strong", { children: chinaSortMetric === 'area' ? 'area size' : 'population' }), "."] })] }), _jsx("button", { type: "button", className: "button secondary", onClick: () => setShowChinaProvinceTable(false), children: "Close" })] }), _jsxs("div", { className: "stats-sort-row", role: "radiogroup", "aria-label": "China table sort metric", children: [_jsx("button", { type: "button", className: chinaSortMetric === 'area' ? 'mode-button active' : 'mode-button', onClick: () => setChinaSortMetric('area'), children: "Area Desc" }), _jsx("button", { type: "button", className: chinaSortMetric === 'population' ? 'mode-button active' : 'mode-button', onClick: () => setChinaSortMetric('population'), children: "Population Desc" })] }), _jsx("div", { className: "stats-table-wrap", children: _jsxs("table", { className: "stats-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { scope: "col", children: "Rank" }), _jsx("th", { scope: "col", children: "Province / Division" }), _jsx("th", { scope: "col", children: "Area (km\u00B2)" }), _jsx("th", { scope: "col", children: "Population" })] }) }), _jsx("tbody", { children: chinaProvinceRows.map((row) => (_jsxs("tr", { children: [_jsx("td", { children: row.rank }), _jsxs("td", { children: [_jsx("strong", { children: row.name }), row.nameLocal ? _jsx("span", { children: row.nameLocal }) : null] }), _jsx("td", { children: formatNumber(row.areaKm2) }), _jsx("td", { children: formatNumber(row.population) })] }, row.id))) })] }) }), _jsxs("p", { className: "map-help", children: ["Area reference dates: ", chinaAreaRefs || 'n/a', " \u00B7 Population reference dates: ", chinaPopulationRefs || 'n/a'] })] })) : null, _jsxs("section", { className: "layout-grid", children: [_jsxs("article", { className: "card quiz-card", children: [phase === 'intro' ? (_jsxs(_Fragment, { children: [_jsx("p", { className: "eyebrow", children: "Ready" }), _jsx("h2", { children: "Start Mixed Round" }), _jsxs("p", { children: ["Each round asks 5 randomized questions and guarantees consecutive questions never use the same ", selectedScope === 'world' ? 'country' : 'division', "."] }), _jsx("button", { type: "button", className: "button primary", onClick: startRound, children: "Start Round" })] })) : null, phase === 'quiz' && activeUnit && currentQuestion ? (_jsxs(_Fragment, { children: [_jsxs("div", { className: "quiz-head", children: [_jsxs("div", { children: [_jsxs("p", { className: "eyebrow", children: ["Question ", questionIndex + 1, " / ", roundQuestions.length] }), _jsx("h2", { children: dimensionLabel(currentDimension) })] }), _jsx("div", { className: "progress-pill", "aria-label": "Round progress", children: roundQuestions.map((question, index) => {
+                        }, ariaLabel: "China province boundaries map", interactive: false, helpText: "Read-only China province boundaries map." })] })) : null, showChinaCapitalTable && chinaRegistry ? (_jsxs("section", { className: "card stats-card", "aria-label": "China province capitals", children: [_jsxs("div", { className: "stats-card-head", children: [_jsxs("div", { children: [_jsx("p", { className: "eyebrow", children: "China Provinces" }), _jsx("h2", { children: "Province Capitals" })] }), _jsx("button", { type: "button", className: "button secondary", onClick: () => setShowChinaCapitalTable(false), children: "Close" })] }), _jsx("div", { className: "stats-table-wrap", children: _jsxs("table", { className: "stats-table capitals-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { scope: "col", children: "Province / Division" }), _jsx("th", { scope: "col", children: "Capital" })] }) }), _jsx("tbody", { children: chinaCapitalRows.map((row) => (_jsxs("tr", { children: [_jsxs("td", { children: [_jsx("strong", { children: row.name }), row.nameLocal ? _jsx("span", { children: row.nameLocal }) : null] }), _jsxs("td", { children: [_jsx("strong", { children: row.capitalPrimary }), row.capitalAliases.length > 0 ? _jsx("span", { children: row.capitalAliases.join(', ') }) : null] })] }, row.id))) })] }) })] })) : null, showChinaProvinceTable && chinaRegistry ? (_jsxs("section", { className: "card stats-card", "aria-label": "China province rankings", children: [_jsxs("div", { className: "stats-card-head", children: [_jsxs("div", { children: [_jsx("p", { className: "eyebrow", children: "China Provinces" }), _jsx("h2", { children: "Area and Population Table" }), _jsxs("p", { children: ["Sorted descending by", ' ', _jsx("strong", { children: chinaSortMetric === 'area' ? 'area size' : 'population' }), "."] })] }), _jsx("button", { type: "button", className: "button secondary", onClick: () => setShowChinaProvinceTable(false), children: "Close" })] }), _jsxs("div", { className: "stats-sort-row", role: "radiogroup", "aria-label": "China table sort metric", children: [_jsx("button", { type: "button", className: chinaSortMetric === 'area' ? 'mode-button active' : 'mode-button', onClick: () => setChinaSortMetric('area'), children: "Area Desc" }), _jsx("button", { type: "button", className: chinaSortMetric === 'population' ? 'mode-button active' : 'mode-button', onClick: () => setChinaSortMetric('population'), children: "Population Desc" })] }), _jsx("div", { className: "stats-table-wrap", children: _jsxs("table", { className: "stats-table", children: [_jsx("thead", { children: _jsxs("tr", { children: [_jsx("th", { scope: "col", children: "Rank" }), _jsx("th", { scope: "col", children: "Province / Division" }), _jsx("th", { scope: "col", children: "Area (km\u00B2)" }), _jsx("th", { scope: "col", children: "Population" })] }) }), _jsx("tbody", { children: chinaProvinceRows.map((row) => (_jsxs("tr", { children: [_jsx("td", { children: row.rank }), _jsxs("td", { children: [_jsx("strong", { children: row.name }), row.nameLocal ? _jsx("span", { children: row.nameLocal }) : null] }), _jsx("td", { children: formatNumber(row.areaKm2) }), _jsx("td", { children: formatNumber(row.population) })] }, row.id))) })] }) }), _jsxs("p", { className: "map-help", children: ["Area reference dates: ", chinaAreaRefs || 'n/a', " \u00B7 Population reference dates: ", chinaPopulationRefs || 'n/a'] })] })) : null, _jsxs("section", { className: "layout-grid", children: [_jsxs("article", { className: "card quiz-card", children: [phase === 'intro' ? (_jsxs(_Fragment, { children: [_jsx("p", { className: "eyebrow", children: "Ready" }), _jsx("h2", { children: "Start Mixed Round" }), _jsxs("p", { children: ["Each round asks ", questionOrder.length, " randomized questions and guarantees consecutive questions never use the same ", selectedScope === 'world' ? 'country' : 'division', "."] }), _jsx("button", { type: "button", className: "button primary", onClick: startRound, children: "Start Round" })] })) : null, phase === 'quiz' && activeUnit && currentQuestion ? (_jsxs(_Fragment, { children: [_jsxs("div", { className: "quiz-head", children: [_jsxs("div", { children: [_jsxs("p", { className: "eyebrow", children: ["Question ", questionIndex + 1, " / ", roundQuestions.length] }), _jsx("h2", { children: dimensionLabel(currentDimension) })] }), _jsx("div", { className: "progress-pill", "aria-label": "Round progress", children: roundQuestions.map((question, index) => {
                                                     const done = index < results.length;
                                                     const current = index === questionIndex;
                                                     return (_jsx("span", { className: done ? 'dot done' : current ? 'dot current' : 'dot' }, `${question.dimension}-${question.unit.id}-${index}`));
-                                                }) })] }), _jsx("p", { className: "prompt", children: questionPrompt(currentDimension, activeUnit, selectedScope) }), currentDimension === 'outline' ? _jsx(OutlinePreview, { geometry: activeUnit.geometry }) : null, currentDimension === 'capital' ||
-                                        currentDimension === 'population' ||
-                                        currentDimension === 'area' ? (_jsxs(_Fragment, { children: [_jsx("p", { className: "eyebrow", children: "Target Outline" }), _jsx(OutlinePreview, { geometry: activeUnit.geometry })] })) : null, currentDimension === 'location' ? (_jsx(WorldMapPicker, { units: activeRegistry.units, selectedPoint: locationGuess, onSelect: (point) => {
+                                                }) })] }), _jsx("p", { className: "prompt", children: questionPrompt(currentDimension, activeUnit, selectedScope) }), currentDimension === 'outline' ? _jsx(OutlinePreview, { geometry: activeUnit.geometry }) : null, showTargetOutline ? (_jsxs(_Fragment, { children: [_jsx("p", { className: "eyebrow", children: "Target Outline" }), _jsx(OutlinePreview, { geometry: activeUnit.geometry })] })) : null, currentDimension === 'chineseName' ? (_jsxs("section", { className: "local-name-card", "aria-label": "Chinese name prompt", children: [_jsx("p", { className: "eyebrow", children: "Chinese Name" }), _jsx("p", { className: "local-name-text", children: activeUnit.nameLocal ?? 'N/A' })] })) : null, currentDimension === 'location' ? (_jsx(WorldMapPicker, { units: activeRegistry.units, selectedPoint: locationGuess, onSelect: (point) => {
                                             if (submittedResult) {
                                                 return;
                                             }
                                             setLocationGuess(point);
-                                        }, targetPoint: activeUnit.labelPoint, revealTarget: Boolean(submittedResult), highlightUnitId: submittedResult ? activeUnit.id : undefined, ariaLabel: `${scopeLabel(selectedScope)} map picker. Click to place a pin.` })) : null, currentDimension !== 'location' ? (_jsxs("label", { className: "field", children: [_jsx("span", { children: currentDimension === 'outline'
+                                        }, targetPoint: activeUnit.labelPoint, revealTarget: Boolean(submittedResult), highlightUnitId: submittedResult ? activeUnit.id : undefined, ariaLabel: `${scopeLabel(selectedScope)} map picker. Click to place a pin.` })) : null, usesTextInput ? (_jsxs("label", { className: "field", children: [_jsx("span", { children: currentDimension === 'outline'
                                                     ? selectedScope === 'world'
                                                         ? 'Country name'
                                                         : 'Province/division name'
@@ -289,7 +323,12 @@ const App = () => {
                                                             ? 'Population estimate'
                                                             : 'Area estimate (km²)' }), _jsx("input", { type: "text", value: textGuess, list: currentDimension === 'outline' ? 'unit-name-list' : undefined, placeholder: currentDimension === 'population' || currentDimension === 'area'
                                                     ? 'Examples: 84m, 12500000, 1.2b'
-                                                    : 'Type your answer', onChange: (event) => setTextGuess(event.target.value), disabled: Boolean(submittedResult) })] })) : null, _jsx("datalist", { id: "unit-name-list", children: allUnitNames.map((name) => (_jsx("option", { value: name }, name))) }), _jsx("div", { className: "actions-row", children: !submittedResult ? (_jsxs(_Fragment, { children: [_jsx("button", { type: "button", className: "button secondary", onClick: () => {
+                                                    : 'Type your answer', onChange: (event) => setTextGuess(event.target.value), disabled: Boolean(submittedResult) })] })) : null, currentDimension === 'chineseName' ? (_jsxs("fieldset", { className: "dimension-picker", children: [_jsx("legend", { children: "Select the matching province/division" }), _jsx("div", { className: "option-grid", children: choiceOptions.map((option) => (_jsx("button", { type: "button", className: choiceGuessId === option.id ? 'option-button selected' : 'option-button', onClick: () => {
+                                                        if (submittedResult) {
+                                                            return;
+                                                        }
+                                                        setChoiceGuessId(option.id);
+                                                    }, disabled: Boolean(submittedResult), "aria-pressed": choiceGuessId === option.id, children: option.name }, option.id))) })] })) : null, _jsx("datalist", { id: "unit-name-list", children: allUnitNames.map((name) => (_jsx("option", { value: name }, name))) }), _jsx("div", { className: "actions-row", children: !submittedResult ? (_jsxs(_Fragment, { children: [_jsx("button", { type: "button", className: "button secondary", onClick: () => {
                                                         setHintVisible(true);
                                                         setHintUsed(true);
                                                     }, children: "Show Hint" }), _jsx("button", { type: "button", className: "button primary", onClick: submitAnswer, children: "Submit" })] })) : (_jsx("button", { type: "button", className: "button primary", onClick: proceed, children: questionIndex === roundQuestions.length - 1 ? 'Finish Round' : 'Next Question' })) }), hintVisible ? _jsxs("p", { className: "hint", children: ["Hint: ", questionHint(currentDimension, activeUnit)] }) : null, inputError ? _jsx("p", { className: "error-text", children: inputError }) : null, submittedResult ? (_jsxs("section", { className: "feedback", children: [_jsxs("div", { className: "feedback-row", children: [_jsx("span", { className: scoreChipClass(submittedResult.finalScore), children: submittedResult.finalScore }), _jsx("p", { children: submittedResult.feedback })] }), _jsxs("p", { children: [_jsx("strong", { children: "Your answer:" }), " ", submittedResult.guessLabel] }), _jsxs("p", { children: [_jsx("strong", { children: "Correct answer:" }), " ", submittedResult.answerLabel] }), submittedResult.detail ? _jsx("p", { children: submittedResult.detail }) : null, submittedResult.hintUsed ? _jsx("p", { className: "penalty-note", children: "Hint penalty applied: -15 points." }) : null] })) : null] })) : null, phase === 'summary' && summary ? (_jsxs(_Fragment, { children: [_jsxs("p", { className: "eyebrow", children: ["Round Summary \u00B7 ", scopeLabel(summary.scope)] }), _jsxs("h2", { children: [summary.unitsUsed, " Units"] }), _jsxs("p", { children: ["Round score: ", _jsx("strong", { children: formatPercent(summary.averageScore) })] }), _jsx("ul", { className: "result-list", children: summary.results.map((item, index) => {

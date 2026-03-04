@@ -2,7 +2,16 @@ import { ReactNode, useEffect, useMemo, useState } from 'react';
 import { OutlinePreview } from './components/OutlinePreview';
 import { WorldMapPicker } from './components/WorldMapPicker';
 import { mulberry32 } from './lib/random';
-import { evaluateLocationQuestion, evaluateOutlineTextQuestion, evaluateTextQuestion, QUESTION_ORDER, questionHint, questionPrompt, dimensionLabel } from './lib/quiz';
+import {
+  dimensionLabel,
+  evaluateChineseNameChoiceQuestion,
+  evaluateLocationQuestion,
+  evaluateOutlineTextQuestion,
+  evaluateTextQuestion,
+  questionHint,
+  questionOrderForScope,
+  questionPrompt,
+} from './lib/quiz';
 import { loadRegistries } from './lib/registry';
 import { applyRoundToProgress, createEmptyProgress, loadProgress, saveProgress } from './lib/storage';
 import { formatNumber } from './lib/strings';
@@ -13,6 +22,7 @@ type AppPhase = 'loading' | 'intro' | 'quiz' | 'summary' | 'error';
 type RoundQuestion = {
   dimension: QuizDimension;
   unit: GeoUnitRecord;
+  choiceOptionIds?: string[];
 };
 
 type RoundSummary = {
@@ -129,7 +139,7 @@ const scopeLabel = (scope: GeoScope): string => (scope === 'world' ? 'World Coun
 const scopeDescription = (scope: GeoScope): string =>
   scope === 'world'
     ? 'Quiz yourself on world countries across outline, location, capital, population, and area.'
-    : 'Quiz yourself on China provincial-level divisions across outline, location, capital, population, and area.';
+    : 'Quiz yourself on China provincial-level divisions across outline, location, capital, population, area, and Chinese-name recognition.';
 
 const unitProgressKey = (scope: GeoScope, unitId: string): string => `${scope}:${unitId}`;
 
@@ -142,28 +152,53 @@ const shuffled = <T,>(values: T[], rng: () => number): T[] => {
   return copy;
 };
 
+const buildChoiceOptionIds = (
+  units: GeoUnitRecord[],
+  answer: GeoUnitRecord,
+  rng: () => number,
+): string[] => {
+  const distractors = shuffled(
+    units.filter((unit) => unit.id !== answer.id),
+    rng,
+  ).slice(0, 3);
+
+  return shuffled([answer, ...distractors], rng).map((unit) => unit.id);
+};
+
 const buildRoundQuestions = (
   units: GeoUnitRecord[],
+  dimensions: QuizDimension[],
   seedValue: number,
   previousUnitId: string | null,
 ): RoundQuestion[] => {
   const rng = mulberry32(seedValue);
-  const dimensions = shuffled([...QUESTION_ORDER], mulberry32(seedValue + 71));
+  const shuffledDimensions = shuffled([...dimensions], mulberry32(seedValue + 71));
   const questions: RoundQuestion[] = [];
   let previousId = previousUnitId;
 
-  dimensions.forEach((dimension) => {
-    let unit = units[Math.floor(rng() * units.length)];
+  shuffledDimensions.forEach((dimension) => {
+    const unitPoolBase =
+      dimension === 'chineseName'
+        ? units.filter((candidate) => Boolean(candidate.nameLocal && candidate.nameLocal.trim()))
+        : units;
+    const unitPool = unitPoolBase.length > 0 ? unitPoolBase : units;
 
-    if (units.length > 1) {
+    let unit = unitPool[Math.floor(rng() * unitPool.length)];
+
+    if (unitPool.length > 1) {
       let guard = 0;
       while (unit.id === previousId && guard < 50) {
-        unit = units[Math.floor(rng() * units.length)];
+        unit = unitPool[Math.floor(rng() * unitPool.length)];
         guard += 1;
       }
     }
 
-    questions.push({ dimension, unit });
+    const question: RoundQuestion = { dimension, unit };
+    if (dimension === 'chineseName') {
+      question.choiceOptionIds = buildChoiceOptionIds(unitPool, unit, rng);
+    }
+
+    questions.push(question);
     previousId = unit.id;
   });
 
@@ -207,6 +242,7 @@ const App = () => {
   const [results, setResults] = useState<QuestionResult[]>([]);
 
   const [textGuess, setTextGuess] = useState('');
+  const [choiceGuessId, setChoiceGuessId] = useState<string | null>(null);
   const [locationGuess, setLocationGuess] = useState<Point | null>(null);
   const [hintVisible, setHintVisible] = useState(false);
   const [hintUsed, setHintUsed] = useState(false);
@@ -236,6 +272,10 @@ const App = () => {
 
   const activeRegistry = registries?.[selectedScope] ?? null;
   const chinaRegistry = registries?.china ?? null;
+  const questionOrder = useMemo<QuizDimension[]>(
+    () => (activeRegistry ? questionOrderForScope(selectedScope, activeRegistry.units) : questionOrderForScope(selectedScope, [])),
+    [activeRegistry, selectedScope],
+  );
 
   const chinaProvinceRows = useMemo<ChinaProvinceRow[]>(() => {
     if (!chinaRegistry) {
@@ -298,6 +338,7 @@ const App = () => {
 
   const resetQuestionState = (): void => {
     setTextGuess('');
+    setChoiceGuessId(null);
     setLocationGuess(null);
     setHintVisible(false);
     setHintUsed(false);
@@ -326,6 +367,7 @@ const App = () => {
 
     const generated = buildRoundQuestions(
       activeRegistry.units,
+      questionOrder,
       seed + roundCount * 7919 + 17,
       lastQuestionUnitByScope[selectedScope],
     );
@@ -339,8 +381,18 @@ const App = () => {
   };
 
   const currentQuestion = roundQuestions[questionIndex] ?? null;
-  const currentDimension = currentQuestion?.dimension ?? QUESTION_ORDER[0];
+  const currentDimension = currentQuestion?.dimension ?? questionOrder[0] ?? 'outline';
   const activeUnit = currentQuestion?.unit ?? null;
+  const choiceOptions = useMemo<GeoUnitRecord[]>(() => {
+    if (!activeRegistry || !currentQuestion?.choiceOptionIds) {
+      return [];
+    }
+
+    const byId = new Map(activeRegistry.units.map((unit) => [unit.id, unit]));
+    return currentQuestion.choiceOptionIds
+      .map((optionId) => byId.get(optionId))
+      .filter((unit): unit is GeoUnitRecord => Boolean(unit));
+  }, [activeRegistry, currentQuestion]);
 
   const submitAnswer = (): void => {
     if (!activeUnit || submittedResult) {
@@ -355,6 +407,11 @@ const App = () => {
 
     if (currentDimension === 'location') {
       next = evaluateLocationQuestion(activeUnit, locationGuess, hintUsed);
+    }
+
+    if (currentDimension === 'chineseName') {
+      const selectedUnit = choiceOptions.find((option) => option.id === choiceGuessId) ?? null;
+      next = evaluateChineseNameChoiceQuestion(activeUnit, selectedUnit, hintUsed);
     }
 
     if (currentDimension === 'capital' || currentDimension === 'population' || currentDimension === 'area') {
@@ -466,6 +523,16 @@ const App = () => {
   const allUnitNames = activeRegistry.units.map((unit) => unit.name);
   const hidePopulationMetric = phase === 'quiz' && currentDimension === 'population';
   const hideAreaMetric = phase === 'quiz' && currentDimension === 'area';
+  const showTargetOutline =
+    currentDimension === 'capital' ||
+    currentDimension === 'population' ||
+    currentDimension === 'area' ||
+    currentDimension === 'chineseName';
+  const usesTextInput =
+    currentDimension === 'outline' ||
+    currentDimension === 'capital' ||
+    currentDimension === 'population' ||
+    currentDimension === 'area';
 
   return (
     <main className="app-shell">
@@ -683,8 +750,8 @@ const App = () => {
               <p className="eyebrow">Ready</p>
               <h2>Start Mixed Round</h2>
               <p>
-                Each round asks 5 randomized questions and guarantees consecutive questions never use the
-                same {selectedScope === 'world' ? 'country' : 'division'}.
+                Each round asks {questionOrder.length} randomized questions and guarantees consecutive
+                questions never use the same {selectedScope === 'world' ? 'country' : 'division'}.
               </p>
               <button type="button" className="button primary" onClick={startRound}>
                 Start Round
@@ -717,13 +784,18 @@ const App = () => {
 
               {currentDimension === 'outline' ? <OutlinePreview geometry={activeUnit.geometry} /> : null}
 
-              {currentDimension === 'capital' ||
-              currentDimension === 'population' ||
-              currentDimension === 'area' ? (
+              {showTargetOutline ? (
                 <>
                   <p className="eyebrow">Target Outline</p>
                   <OutlinePreview geometry={activeUnit.geometry} />
                 </>
+              ) : null}
+
+              {currentDimension === 'chineseName' ? (
+                <section className="local-name-card" aria-label="Chinese name prompt">
+                  <p className="eyebrow">Chinese Name</p>
+                  <p className="local-name-text">{activeUnit.nameLocal ?? 'N/A'}</p>
+                </section>
               ) : null}
 
               {currentDimension === 'location' ? (
@@ -743,7 +815,7 @@ const App = () => {
                 />
               ) : null}
 
-              {currentDimension !== 'location' ? (
+              {usesTextInput ? (
                 <label className="field">
                   <span>
                     {currentDimension === 'outline'
@@ -769,6 +841,31 @@ const App = () => {
                     disabled={Boolean(submittedResult)}
                   />
                 </label>
+              ) : null}
+
+              {currentDimension === 'chineseName' ? (
+                <fieldset className="dimension-picker">
+                  <legend>Select the matching province/division</legend>
+                  <div className="option-grid">
+                    {choiceOptions.map((option) => (
+                      <button
+                        key={option.id}
+                        type="button"
+                        className={choiceGuessId === option.id ? 'option-button selected' : 'option-button'}
+                        onClick={() => {
+                          if (submittedResult) {
+                            return;
+                          }
+                          setChoiceGuessId(option.id);
+                        }}
+                        disabled={Boolean(submittedResult)}
+                        aria-pressed={choiceGuessId === option.id}
+                      >
+                        {option.name}
+                      </button>
+                    ))}
+                  </div>
+                </fieldset>
               ) : null}
 
               <datalist id="unit-name-list">

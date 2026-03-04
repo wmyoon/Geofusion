@@ -1,6 +1,12 @@
 export type GeoScope = 'world' | 'china';
 
-export type QuizDimension = 'outline' | 'location' | 'capital' | 'population' | 'area';
+export type QuizDimension =
+  | 'outline'
+  | 'location'
+  | 'capital'
+  | 'population'
+  | 'area'
+  | 'chineseName';
 
 export type Point = {
   lat: number;

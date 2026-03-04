@@ -14,10 +14,11 @@ export const createEmptyProgress = () => ({
         capital: emptyDimension(),
         population: emptyDimension(),
         area: emptyDimension(),
+        chineseName: emptyDimension(),
     },
     units: {},
 });
-const isDimension = (value) => ['outline', 'location', 'capital', 'population', 'area'].includes(value);
+const isDimension = (value) => ['outline', 'location', 'capital', 'population', 'area', 'chineseName'].includes(value);
 export const loadProgress = () => {
     try {
         const raw = localStorage.getItem(STORAGE_KEY);
@@ -60,6 +61,7 @@ export const applyRoundToProgress = (progress, questionUnitKeys, results) => {
             capital: { ...progress.dimensions.capital },
             population: { ...progress.dimensions.population },
             area: { ...progress.dimensions.area },
+            chineseName: { ...progress.dimensions.chineseName },
         },
         units: { ...progress.units },
     };

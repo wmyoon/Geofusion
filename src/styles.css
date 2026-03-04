@@ -454,6 +454,21 @@ select {
   border-color: #8dbda9;
 }
 
+.local-name-card {
+  border: 1px solid #c9ddd3;
+  border-radius: 12px;
+  background: #f3faf7;
+  padding: 0.7rem 0.75rem;
+}
+
+.local-name-text {
+  font-size: 1.7rem;
+  line-height: 1.2;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  margin-top: 0.2rem;
+}
+
 .timer-pill {
   display: inline-flex;
   align-items: center;

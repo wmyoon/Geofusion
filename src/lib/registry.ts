@@ -150,9 +150,12 @@ const fetchJson = async <T,>(path: string): Promise<T | null> => {
 };
 
 export const loadRegistries = async (): Promise<Record<GeoScope, GeoRegistryBundle>> => {
+  const worldRegistryUrl = import.meta.env.VITE_COUNTRY_REGISTRY_URL || '/data/country-registry.json';
+  const chinaRegistryUrl = import.meta.env.VITE_CHINA_REGISTRY_URL || '/data/prc-province-registry.json';
+
   const [worldRaw, chinaRaw] = await Promise.all([
-    fetchJson<WorldBundleRaw>('/data/country-registry.json'),
-    fetchJson<ChinaBundleRaw>('/data/prc-province-registry.json'),
+    fetchJson<WorldBundleRaw>(worldRegistryUrl),
+    fetchJson<ChinaBundleRaw>(chinaRegistryUrl),
   ]);
 
   return {

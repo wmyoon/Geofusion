@@ -18,12 +18,13 @@ export const createEmptyProgress = (): ProgressState => ({
     capital: emptyDimension(),
     population: emptyDimension(),
     area: emptyDimension(),
+    chineseName: emptyDimension(),
   },
   units: {},
 });
 
 const isDimension = (value: string): value is QuizDimension =>
-  ['outline', 'location', 'capital', 'population', 'area'].includes(value);
+  ['outline', 'location', 'capital', 'population', 'area', 'chineseName'].includes(value);
 
 export const loadProgress = (): ProgressState => {
   try {
@@ -77,6 +78,7 @@ export const applyRoundToProgress = (
       capital: { ...progress.dimensions.capital },
       population: { ...progress.dimensions.population },
       area: { ...progress.dimensions.area },
+      chineseName: { ...progress.dimensions.chineseName },
     },
     units: { ...progress.units },
   };

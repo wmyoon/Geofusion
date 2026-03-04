@@ -90,9 +90,11 @@ const fetchJson = async (path) => {
     }
 };
 export const loadRegistries = async () => {
+    const worldRegistryUrl = import.meta.env.VITE_COUNTRY_REGISTRY_URL || '/data/country-registry.json';
+    const chinaRegistryUrl = import.meta.env.VITE_CHINA_REGISTRY_URL || '/data/prc-province-registry.json';
     const [worldRaw, chinaRaw] = await Promise.all([
-        fetchJson('/data/country-registry.json'),
-        fetchJson('/data/prc-province-registry.json'),
+        fetchJson(worldRegistryUrl),
+        fetchJson(chinaRegistryUrl),
     ]);
     return {
         world: worldRaw ? normalizeWorld(worldRaw) : sampleWorldRegistry,

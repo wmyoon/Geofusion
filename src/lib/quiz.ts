@@ -3,7 +3,25 @@ import { scoreArea, scoreLocation, scorePopulation } from './scoring';
 import { equalsAlias, formatCompact, formatNumber, parseHumanNumber, similarityScore } from './strings';
 import { GeoScope, GeoUnitRecord, Point, QuestionResult, QuizDimension } from '../types';
 
-export const QUESTION_ORDER: QuizDimension[] = ['outline', 'location', 'capital', 'population', 'area'];
+export const WORLD_QUESTION_ORDER: QuizDimension[] = ['outline', 'location', 'capital', 'population', 'area'];
+export const CHINA_QUESTION_ORDER: QuizDimension[] = [
+  'outline',
+  'location',
+  'capital',
+  'population',
+  'area',
+  'chineseName',
+];
+
+const hasChineseLocalName = (unit: GeoUnitRecord): boolean => Boolean(unit.nameLocal && unit.nameLocal.trim());
+
+export const questionOrderForScope = (scope: GeoScope, units: GeoUnitRecord[]): QuizDimension[] => {
+  if (scope !== 'china') {
+    return WORLD_QUESTION_ORDER;
+  }
+
+  return units.some(hasChineseLocalName) ? CHINA_QUESTION_ORDER : WORLD_QUESTION_ORDER;
+};
 
 const HINT_PENALTY = 15;
 
@@ -24,6 +42,10 @@ export const dimensionLabel = (dimension: QuizDimension): string => {
 
   if (dimension === 'population') {
     return 'Population';
+  }
+
+  if (dimension === 'chineseName') {
+    return 'Chinese Name';
   }
 
   return 'Area';
@@ -48,6 +70,10 @@ export const questionPrompt = (
 
   if (dimension === 'population') {
     return `Estimate ${unit.name}'s population (${unit.population.refDate}).`;
+  }
+
+  if (dimension === 'chineseName') {
+    return 'Choose the province/division that matches this Chinese name.';
   }
 
   return `Estimate ${unit.name}'s area in km² (${unit.areaKm2.refDate}).`;
@@ -76,6 +102,10 @@ export const questionHint = (dimension: QuizDimension, unit: GeoUnitRecord): str
 
   if (dimension === 'population') {
     return magnitudeHint(unit.population.value, 'people');
+  }
+
+  if (dimension === 'chineseName') {
+    return `Region hint: ${unit.regionHint}.`;
   }
 
   return magnitudeHint(unit.areaKm2.value, 'km²');
@@ -241,5 +271,29 @@ export const evaluateLocationQuestion = (
         : 'Placement was far from target.',
     rawScore >= 60,
     `Boundary distance: ${Math.round(scoredDistanceKm)} km (centroid: ${Math.round(distanceToCentroidKm)} km)`,
+  );
+};
+
+export const evaluateChineseNameChoiceQuestion = (
+  unit: GeoUnitRecord,
+  guess: GeoUnitRecord | null,
+  hintUsed: boolean,
+): QuestionResult | null => {
+  if (!guess) {
+    return null;
+  }
+
+  const isCorrect = guess.id === unit.id;
+  const rawScore = isCorrect ? 100 : 0;
+
+  return textResult(
+    'chineseName',
+    rawScore,
+    hintUsed,
+    guess.name,
+    unit.name,
+    isCorrect ? 'Correct province/division match.' : 'Incorrect province/division choice.',
+    isCorrect,
+    `Chinese name shown: ${unit.nameLocal ?? 'N/A'}`,
   );
 };
