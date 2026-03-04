@@ -34,6 +34,7 @@ type RoundSummary = {
 };
 
 type ChinaSortMetric = 'area' | 'population';
+type ChinaPanel = 'none' | 'map' | 'capitals' | 'stats';
 
 type ChinaProvinceRow = {
   rank: number;
@@ -250,9 +251,7 @@ const App = () => {
   const [inputError, setInputError] = useState('');
 
   const [summary, setSummary] = useState<RoundSummary | null>(null);
-  const [showChinaMap, setShowChinaMap] = useState(false);
-  const [showChinaCapitalTable, setShowChinaCapitalTable] = useState(false);
-  const [showChinaProvinceTable, setShowChinaProvinceTable] = useState(false);
+  const [activeChinaPanel, setActiveChinaPanel] = useState<ChinaPanel>('none');
   const [chinaSortMetric, setChinaSortMetric] = useState<ChinaSortMetric>('area');
 
   useEffect(() => {
@@ -523,6 +522,15 @@ const App = () => {
   const allUnitNames = activeRegistry.units.map((unit) => unit.name);
   const hidePopulationMetric = phase === 'quiz' && currentDimension === 'population';
   const hideAreaMetric = phase === 'quiz' && currentDimension === 'area';
+  const chineseNameCharacters =
+    currentDimension === 'chineseName' && activeUnit.nameLocal
+      ? Array.from(activeUnit.nameLocal.replace(/\s+/g, ''))
+      : [];
+  const chineseNameFontSizeRem =
+    chineseNameCharacters.length > 0 ? Math.min(5.2, Math.max(2.2, 15 / chineseNameCharacters.length)) : 2.2;
+  const showChinaMap = activeChinaPanel === 'map';
+  const showChinaCapitalTable = activeChinaPanel === 'capitals';
+  const showChinaProvinceTable = activeChinaPanel === 'stats';
   const showTargetOutline =
     currentDimension === 'capital' ||
     currentDimension === 'population' ||
@@ -536,7 +544,7 @@ const App = () => {
 
   return (
     <main className="app-shell">
-      <header className="hero card">
+      <header className="hero card hero-compact">
         <div>
           <p className="eyebrow">Geo Fusion Quiz</p>
           <h1>{scopeLabel(selectedScope)}</h1>
@@ -561,27 +569,27 @@ const App = () => {
 
           <div className="actions-row hero-actions">
             <TopActionButton
-              label={showChinaMap ? 'Hide China map panel' : 'Show China map panel'}
+              label={showChinaMap ? 'China map panel active' : 'Show China map panel'}
               caption="Map"
               icon={<MapPanelIcon />}
               active={showChinaMap}
-              onClick={() => setShowChinaMap((value) => !value)}
+              onClick={() => setActiveChinaPanel('map')}
               disabled={!chinaRegistry}
             />
             <TopActionButton
-              label={showChinaCapitalTable ? 'Hide province capitals panel' : 'Show province capitals panel'}
+              label={showChinaCapitalTable ? 'Province capitals panel active' : 'Show province capitals panel'}
               caption="Capitals"
               icon={<CapitalsPanelIcon />}
               active={showChinaCapitalTable}
-              onClick={() => setShowChinaCapitalTable((value) => !value)}
+              onClick={() => setActiveChinaPanel('capitals')}
               disabled={!chinaRegistry}
             />
             <TopActionButton
-              label={showChinaProvinceTable ? 'Hide China stats table panel' : 'Show China stats table panel'}
+              label={showChinaProvinceTable ? 'China stats table panel active' : 'Show China stats table panel'}
               caption="Stats"
               icon={<StatsPanelIcon />}
               active={showChinaProvinceTable}
-              onClick={() => setShowChinaProvinceTable((value) => !value)}
+              onClick={() => setActiveChinaPanel('stats')}
               disabled={!chinaRegistry}
             />
           </div>
@@ -613,7 +621,7 @@ const App = () => {
             <button
               type="button"
               className="button secondary"
-              onClick={() => setShowChinaMap(false)}
+              onClick={() => setActiveChinaPanel('none')}
             >
               Close
             </button>
@@ -627,6 +635,8 @@ const App = () => {
             ariaLabel="China province boundaries map"
             interactive={false}
             helpText="Read-only China province boundaries map."
+            showUnitLabels
+            unitLabelAccessor={(unit) => unit.nameLocal ?? unit.name}
           />
         </section>
       ) : null}
@@ -641,7 +651,7 @@ const App = () => {
             <button
               type="button"
               className="button secondary"
-              onClick={() => setShowChinaCapitalTable(false)}
+              onClick={() => setActiveChinaPanel('none')}
             >
               Close
             </button>
@@ -688,7 +698,7 @@ const App = () => {
             <button
               type="button"
               className="button secondary"
-              onClick={() => setShowChinaProvinceTable(false)}
+              onClick={() => setActiveChinaPanel('none')}
             >
               Close
             </button>
@@ -794,7 +804,15 @@ const App = () => {
               {currentDimension === 'chineseName' ? (
                 <section className="local-name-card" aria-label="Chinese name prompt">
                   <p className="eyebrow">Chinese Name</p>
-                  <p className="local-name-text">{activeUnit.nameLocal ?? 'N/A'}</p>
+                  <p className="local-name-text" style={{ fontSize: `${chineseNameFontSizeRem}rem` }}>
+                    {chineseNameCharacters.length > 0
+                      ? chineseNameCharacters.map((character, index) => (
+                          <span key={`${character}-${index}`} className="local-name-char">
+                            {character}
+                          </span>
+                        ))
+                      : 'N/A'}
+                  </p>
                 </section>
               ) : null}
 
