@@ -70,3 +70,14 @@ npm run test:10
   - `e <= 50%` -> `30`
   - `e > 50%` -> `0`
   where `e = |guess - true| / true`
+
+## Cloudflare auto-deploy (GitHub Actions)
+
+This repo includes `.github/workflows/cloudflare-pages.yml` to auto-deploy to Cloudflare Pages on every push to `master`.
+
+Required GitHub repository secrets:
+
+1. `CLOUDFLARE_API_TOKEN`
+2. `CLOUDFLARE_ACCOUNT_ID`
+
+Token scope should include Cloudflare Pages edit permissions for the target account.
