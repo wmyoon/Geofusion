@@ -163,6 +163,7 @@ const DIVISION_METADATA = {
     aliases: ['Hebei Province', '河北'],
     capitalPrimary: 'Shijiazhuang',
     capitalAliases: ['Shijiazhuang', '石家庄'],
+    labelPoint: { lat: 38.85, lng: 115.45 },
   },
   'CN-HI': {
     nameEn: 'Hainan',
@@ -749,7 +750,8 @@ const build = async () => {
       capitalAliases,
       centroid,
       bbox,
-      labelPoint: centroid,
+      // Some divisions need a representative interior anchor instead of the raw centroid.
+      labelPoint: metadata.labelPoint ?? centroid,
       population: {
         value: populationValue,
         refDate: populationRefDate,
