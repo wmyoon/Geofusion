@@ -520,6 +520,7 @@ const App = () => {
   }
 
   const allUnitNames = activeRegistry.units.map((unit) => unit.name);
+  const isChinaScope = selectedScope === 'china';
   const hidePopulationMetric = phase === 'quiz' && currentDimension === 'population';
   const hideAreaMetric = phase === 'quiz' && currentDimension === 'area';
   const chineseNameCharacters =
@@ -528,9 +529,9 @@ const App = () => {
       : [];
   const chineseNameFontSizeRem =
     chineseNameCharacters.length > 0 ? Math.min(5.2, Math.max(2.2, 15 / chineseNameCharacters.length)) : 2.2;
-  const showChinaMap = activeChinaPanel === 'map';
-  const showChinaCapitalTable = activeChinaPanel === 'capitals';
-  const showChinaProvinceTable = activeChinaPanel === 'stats';
+  const showChinaMap = isChinaScope && activeChinaPanel === 'map';
+  const showChinaCapitalTable = isChinaScope && activeChinaPanel === 'capitals';
+  const showChinaProvinceTable = isChinaScope && activeChinaPanel === 'stats';
   const showTargetOutline =
     currentDimension === 'capital' ||
     currentDimension === 'population' ||
@@ -567,32 +568,34 @@ const App = () => {
             </button>
           </div>
 
-          <div className="actions-row hero-actions">
-            <TopActionButton
-              label={showChinaMap ? 'China map panel active' : 'Show China map panel'}
-              caption="Map"
-              icon={<MapPanelIcon />}
-              active={showChinaMap}
-              onClick={() => setActiveChinaPanel('map')}
-              disabled={!chinaRegistry}
-            />
-            <TopActionButton
-              label={showChinaCapitalTable ? 'Province capitals panel active' : 'Show province capitals panel'}
-              caption="Capitals"
-              icon={<CapitalsPanelIcon />}
-              active={showChinaCapitalTable}
-              onClick={() => setActiveChinaPanel('capitals')}
-              disabled={!chinaRegistry}
-            />
-            <TopActionButton
-              label={showChinaProvinceTable ? 'China stats table panel active' : 'Show China stats table panel'}
-              caption="Stats"
-              icon={<StatsPanelIcon />}
-              active={showChinaProvinceTable}
-              onClick={() => setActiveChinaPanel('stats')}
-              disabled={!chinaRegistry}
-            />
-          </div>
+          {isChinaScope ? (
+            <div className="actions-row hero-actions">
+              <TopActionButton
+                label={showChinaMap ? 'China map panel active' : 'Show China map panel'}
+                caption="Map"
+                icon={<MapPanelIcon />}
+                active={showChinaMap}
+                onClick={() => setActiveChinaPanel('map')}
+                disabled={!chinaRegistry}
+              />
+              <TopActionButton
+                label={showChinaCapitalTable ? 'Province capitals panel active' : 'Show province capitals panel'}
+                caption="Capitals"
+                icon={<CapitalsPanelIcon />}
+                active={showChinaCapitalTable}
+                onClick={() => setActiveChinaPanel('capitals')}
+                disabled={!chinaRegistry}
+              />
+              <TopActionButton
+                label={showChinaProvinceTable ? 'China stats table panel active' : 'Show China stats table panel'}
+                caption="Stats"
+                icon={<StatsPanelIcon />}
+                active={showChinaProvinceTable}
+                onClick={() => setActiveChinaPanel('stats')}
+                disabled={!chinaRegistry}
+              />
+            </div>
+          ) : null}
         </div>
 
         <dl className="hero-stats">
